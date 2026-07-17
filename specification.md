@@ -320,7 +320,25 @@ clear = [
 
 `archive-request`から`deadPlayerUUID`は削除した。死亡記録は4.5節のイベントログに完全移行しており、セーブ（チェックポイント）イベントに死亡プレイヤー情報を含める理由が無いため。
 
-具体的な通信方式（ソケット/HTTP等）とメッセージフォーマットは未確定（次工程で詳細化）。
+### 5.1 通信方式：永続TCPソケット＋NDJSON
+
+Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、これはGateプロキシ自体の管理（プレイヤー一覧・サーバー登録など）専用の固定APIであり、`archive-request`のようなHardcore Together独自のシグナルを流すための汎用の仕組みではない。そのため、MOD⇔Gate間には専用の軽量な通信路を別途用意する。
+
+- **トランスポート**：TCPソケット。Gateが`127.0.0.1`限定でリッスンする（1節の「同一ホスト前提」に基づく。同一ホスト内通信のためTLS/認証は不要と判断）。ポート番号はGateの設定ファイルで指定（例：`signalPort`）
+- **接続方向**：hardcore MOD側が接続しにいく。Gateは常駐プロセス、hardcore MODは`/start`・`/load`のたびにプロセスごと生成・破棄されるため、短命な側（MOD）が長命な側（Gate）へ接続する方が自然
+- **接続タイミング**：MODは`ServerStartedEvent`発火時に接続し、直後に`ready`を送る。接続失敗時は数回リトライ＋バックオフして諦める（ログ出力）
+- **メッセージ形式**：改行区切りJSON（NDJSON）。1メッセージ＝1行のJSONオブジェクト。`type`フィールドで5節の表のどのシグナルかを判別する
+
+```json
+{"type":"ready","running":true}
+{"type":"running-changed","running":false}
+{"type":"archive-request","name":"2026-07-18T12-00-00","elapsedTime":600,"createdAt":"2026-07-18T12:00:00Z"}
+{"type":"archive-complete","name":"2026-07-18T12-00-00"}
+```
+
+- **`archive-request`の同期待ち**：MODは送信後、対応する`archive-complete`（同じ`name`）を受信するまで待ってから`save-on`を実行する（2.5節の手順）
+- **接続断の扱い**：接続が切れたら、Gateはhardcoreの状態を「不明」とみなし、`running`キャッシュは安全側（`true`扱い、`/start`・`/load`拒否）にする（2.1節と整合）
+- protobuf/ConnectRPCのような型付けIDLは採用しない。シグナル数が少なく（4種）、Gate本体と同じ技術スタックに揃える必要性より、依存を増やさないシンプルさを優先した
 
 ## 6. コマンド一覧（全体まとめ）
 
@@ -373,10 +391,10 @@ clear = [
 - `/start force`・`/load <name> force`・`/load latest force`を追加。`running=true`（挑戦進行中）による拒否チェックのみを免除し、進行中の挑戦を強制的に中断・破棄できるようにする。アーカイブ実行中の排他制御など他の安全機構は`force`でも免除しない
 - プロジェクト名を確定：hardcoreサーバーのMODは**Hardcore Together**（連帯責任を表す。特定MODに依存しない汎用フレームワークのため固有名詞は含めない）、lobbyサーバーのMODは**Parkour Lobby**（チェックポイントはパルクールコースの中間セーブという位置づけ）、プロキシは**Hardcore Together Gate**
 - 両MODとも**サーバーサイドのみで完結**させる。クライアント側へのMOD導入は不要とし、カスタム`Item`/`Block`登録は行わない。Parkour Lobbyのチェックポイント用アイテム・看板はバニラのアイテム/看板ブロックに`minecraft:custom_data`でフラグを付与する方式に変更した
+- MOD⇔Gate間シグナルの通信方式を確定：永続TCPソケット＋NDJSON（改行区切りJSON）。Gateの組み込みAPI（`GateService`）はプロキシ管理専用の固定APIでHardcore Together独自シグナルには使えないため、専用の軽量ソケットを別途用意する。protobuf/ConnectRPCは今回の規模（シグナル4種）にはオーバースペックと判断し不採用
 
 ## 8. 未決事項
 
-- MOD⇔Gate間シグナルの具体的な通信方式・メッセージフォーマット
 - Gate⇔バックエンド間のタイムアウト設定値
 - PCF（Proxy-Compatible-Forge）の具体的なバージョン・設定詳細
 - 権限ノード名の最終決定（`checkpoint.reset`等は旧Paper版からの仮称）
