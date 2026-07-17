@@ -1,0 +1,5 @@
+// Shared plugin/toolchain/NeoForge configuration is applied to this subproject from the root
+// build.gradle's `subprojects { }` block. Add mod-specific dependencies below as needed.
+
+dependencies {
+}
