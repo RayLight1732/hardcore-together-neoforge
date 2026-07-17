@@ -12,6 +12,8 @@ Paper+Velocity製の既存実装（`hardcore/`配下）をNeoForge+Gateへ移行
 
 「Hardcore Together」は連帯責任（1人でも死ねば全員の挑戦終了）を表す名称。特定MODへの依存が無い汎用フレームワークであることも踏まえ、Twilight Forest等の固有名詞は含めていない（ボスは4.4節の設定ファイルで任意に指定可能）。「Parkour Lobby」は、チェックポイント機能がパルクールコースの中間セーブという位置づけであることを表す。以降、本文では簡潔さのため「hardcore MOD」「lobby MOD」と呼ぶ箇所があるが、いずれも上記の正式名称を指す。
 
+**両MODとも、サーバーサイドのみで完結する。クライアント側へのMOD導入は不要**で、バニラクライアントのまま接続できる。カスタムの`Item`/`Block`登録（クライアントにも同期されるレジストリコンテンツ）は行わない。Parkour Lobbyのチェックポイント用アイテム・看板も、バニラのアイテム/看板ブロックへ`minecraft:custom_data`（サーバー側のみが解釈する任意NBT）でフラグを付与する方式にする（3.2節）。これにより、hardcoreサーバー・lobbyサーバーとも、Gate側のPCF（Proxy-Compatible-Forge、1節）さえ導入すればプレイヤーはMOD無しで参加できる。
+
 ## 1. 全体アーキテクチャ
 
 サーバーは2種類、どちらもNeoForge製。プロキシはGate（minekube/gate、Go製）に、Hardcore Together Gate拡張を組み込んで使う。
@@ -148,7 +150,10 @@ Gateはhardcoreサーバーの状態を内部で3値管理する。
 | `/checkpoint give ... <target>` | `checkpoint.give` | 対象プレイヤーに付与 |
 | `/checkpoint help` | 誰でも | ヘルプ表示（OPには管理者コマンドも追加表示） |
 
-チェックポイント用の看板・アイテムはカスタム`Item`/`BlockItem`として登録し、Data Componentでフラグを保持する。設置/使用イベントは`PlayerInteractEvent`等でフックする。
+チェックポイント用の看板・アイテムは**バニラのアイテム/看板ブロックをそのまま使う**（例：`minecraft:oak_sign`、任意のバニラアイテム）。新規`Item`/`Block`は登録しない（0節の「サーバーサイドのみで完結する」制約のため。カスタムレジストリコンテンツはクライアントにも同期が必要になり、MOD無しの接続ができなくなる）。フラグの持たせ方：
+- アイテムは`minecraft:custom_data`（バニラのData Component、任意のNBTを保持できる。クライアントは中身を解釈しないが保持はする）へ、例えば`{"parkourlobby": {"kind": "checkpoint_sign"}}`のようなタグを埋め込む
+- 表示名・Loreはバニラの`minecraft:custom_name`/`minecraft:lore`コンポーネントで独自に付与する（バニラクライアントでも通常のアイテム名/説明文として表示される）
+- 看板は設置後、対応する`BlockEntity`側にも同様のカスタムNBTを保持させ、`PlayerInteractEvent`/設置イベントでこのNBTの有無を見て判定する
 
 サーバー切替系のコマンド（旧`/rta`テレポート相当）はlobby MODには持たせない。すべてGate側の`/rta`・`/lobby`に統一する。
 
@@ -367,6 +372,7 @@ clear = [
 - 全パス情報を9節「ディレクトリ構成」に集約した
 - `/start force`・`/load <name> force`・`/load latest force`を追加。`running=true`（挑戦進行中）による拒否チェックのみを免除し、進行中の挑戦を強制的に中断・破棄できるようにする。アーカイブ実行中の排他制御など他の安全機構は`force`でも免除しない
 - プロジェクト名を確定：hardcoreサーバーのMODは**Hardcore Together**（連帯責任を表す。特定MODに依存しない汎用フレームワークのため固有名詞は含めない）、lobbyサーバーのMODは**Parkour Lobby**（チェックポイントはパルクールコースの中間セーブという位置づけ）、プロキシは**Hardcore Together Gate**
+- 両MODとも**サーバーサイドのみで完結**させる。クライアント側へのMOD導入は不要とし、カスタム`Item`/`Block`登録は行わない。Parkour Lobbyのチェックポイント用アイテム・看板はバニラのアイテム/看板ブロックに`minecraft:custom_data`でフラグを付与する方式に変更した
 
 ## 8. 未決事項
 
@@ -376,6 +382,7 @@ clear = [
 - 権限ノード名の最終決定（`checkpoint.reset`等は旧Paper版からの仮称）
 - lobby/hardcore間でのコード共有（commonモジュール化）の要否
 - ボスMobの具体的なリストと、チェックポイント系/挑戦終了系それぞれへの分類（黄昏の森のどのボスをどちらにするか）
+- `hardcoretogether`のテンプレート由来の`ModBlocks.kt`（`example_block`というカスタムBlockを登録）は「サーバーサイドのみで完結する」制約に反するため、実装時に削除する必要がある
 
 ## 9. ディレクトリ構成
 
