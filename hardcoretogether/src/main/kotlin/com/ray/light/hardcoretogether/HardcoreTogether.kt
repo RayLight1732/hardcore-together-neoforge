@@ -20,7 +20,7 @@ import thedarkcolour.kotlinforforge.neoforge.forge.runForDist
  * An example for blocks is in the `blocks` package of this mod.
  */
 @Mod(HardcoreTogether.ID)
-@EventBusSubscriber(bus = EventBusSubscriber.Bus.MOD)
+@EventBusSubscriber(modid = HardcoreTogether.ID)
 object HardcoreTogether {
     const val ID = "hardcoretogether"
 
