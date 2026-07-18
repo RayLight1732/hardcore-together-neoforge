@@ -1,16 +1,11 @@
-package com.ray.light.hardcoretogether.event
+package com.ray.light.hardcoretogether.adapter.neoforge
 
 import com.ray.light.hardcoretogether.HardcoreTogether
-import com.ray.light.hardcoretogether.archive.ArchiveOps
-import com.ray.light.hardcoretogether.config.BossCategory
-import com.ray.light.hardcoretogether.config.BossConfig
-import com.ray.light.hardcoretogether.gate.GateClient
-import com.ray.light.hardcoretogether.records.PlayerRef
-import com.ray.light.hardcoretogether.records.RecordEvent
-import com.ray.light.hardcoretogether.records.RecordStore
-import com.ray.light.hardcoretogether.records.Trigger
-import com.ray.light.hardcoretogether.state.ChallengeState
-import com.ray.light.hardcoretogether.timer.ElapsedTimeTracker
+import com.ray.light.hardcoretogether.application.ChallengeApplicationService
+import com.ray.light.hardcoretogether.domain.BossCategory
+import com.ray.light.hardcoretogether.domain.BossTrigger
+import com.ray.light.hardcoretogether.domain.PlayerRef
+import com.ray.light.hardcoretogether.port.ChallengeState
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
@@ -23,43 +18,41 @@ import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.level.GameType
-import net.neoforged.bus.api.SubscribeEvent
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent
-import java.time.Instant
 
 /**
  * Spec 4.3: player death (party wipe after a countdown) and boss-kill (checkpoint/clear)
- * handling. Both are driven off LivingDeathEvent, gated on ChallengeState.running.
+ * handling. Both are gated on ChallengeState.running. This holds per-server mutable
+ * countdown state, so it must be an instance (created once per server start in Runtime),
+ * not a singleton object like the pre-refactor DeathHandler was.
  */
-object DeathHandler {
-    private const val COUNTDOWN_SECONDS = 10
-    private const val COUNTDOWN_TICKS = COUNTDOWN_SECONDS * 20
-
+class DeathCountdown(
+    private val applicationService: ChallengeApplicationService,
+    private val challengeState: ChallengeState,
+) {
     private var countdownActive = false
     private var countdownTicksRemaining = 0
     private var pendingRespawn: ServerPlayer? = null
 
-    @SubscribeEvent
     fun onLivingDeath(event: LivingDeathEvent) {
         val level = event.entity.level() as? ServerLevel ?: return
         val server = level.server
-        val state = ChallengeState.get(server)
-        if (!state.running) return
+        if (!challengeState.running) return
 
         val entity = event.entity
         if (entity is ServerPlayer) {
-            handlePlayerDeath(server, state, entity, event)
+            handlePlayerDeath(server, entity, event)
             return
         }
 
         val mobId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.type)?.toString() ?: return
-        val category = BossConfig.categoryOf(mobId)
+        val category = HardcoreConfig.categoryOf(mobId)
         if (category != BossCategory.NONE) {
-            handleBossKill(server, state, mobId, category)
+            handleBossKill(mobId, category)
         }
     }
 
-    /** Call once per server tick from HardcoreTogether's tick listener. */
+    /** Call once per server tick from Runtime.onServerTick. */
     fun onServerTick(server: MinecraftServer) {
         pendingRespawn?.let { player ->
             resetAndSpectate(server, player)
@@ -78,7 +71,7 @@ object DeathHandler {
         }
     }
 
-    private fun handlePlayerDeath(server: MinecraftServer, state: ChallengeState, player: ServerPlayer, event: LivingDeathEvent) {
+    private fun handlePlayerDeath(server: MinecraftServer, player: ServerPlayer, event: LivingDeathEvent) {
         // Spec 4.3 step 1: force a spectator respawn next tick, regardless of whether this
         // death is the one that starts the wipe countdown.
         pendingRespawn = player
@@ -87,15 +80,9 @@ object DeathHandler {
         if (countdownActive) return
 
         val killLog = event.source.getLocalizedDeathMessage(player).string
-        RecordStore.appendEvent(
-            server,
-            state.challengeId,
-            RecordEvent.death(
-                elapsedTime = ElapsedTimeTracker.elapsedSeconds(),
-                timestamp = Instant.now().toString(),
-                deadPlayer = PlayerRef(player.stringUUID, player.gameProfile.name),
-                killLog = killLog,
-            ),
+        applicationService.onPlayerDeath(
+            PlayerRef(player.stringUUID, player.gameProfile.name),
+            killLog,
         )
 
         for (p in server.playerList.players) {
@@ -123,10 +110,6 @@ object DeathHandler {
             sendTitle(p, Component.literal("全滅！"), Component.literal("/lobbyで退出"), 0, 120, 10)
             p.playNotifySound(SoundEvents.ENDER_DRAGON_DEATH, SoundSource.MASTER, 1f, 1f)
         }
-
-        val state = ChallengeState.get(server)
-        state.setRunning(false)
-        GateClient.sendRunningChanged(false)
     }
 
     private fun resetAndSpectate(server: MinecraftServer, oldPlayer: ServerPlayer) {
@@ -137,33 +120,15 @@ object DeathHandler {
         player.foodData.setSaturation(5f)
     }
 
-    private fun handleBossKill(server: MinecraftServer, state: ChallengeState, mobId: String, category: BossCategory) {
-        val name = ArchiveOps.timestampName()
-        val elapsed = ElapsedTimeTracker.elapsedSeconds()
-        val completed = ArchiveOps.performArchive(server, name, elapsed)
-        if (!completed) {
-            HardcoreTogether.LOGGER.error("Boss-kill archive '$name' did not complete in time; continuing anyway")
+    private fun handleBossKill(mobId: String, category: BossCategory) {
+        val trigger = BossTrigger(mobId)
+        val completed = when (category) {
+            BossCategory.CHECKPOINT -> applicationService.recordCheckpoint(trigger)
+            BossCategory.CLEAR -> applicationService.recordClear(trigger)
+            BossCategory.NONE -> return
         }
-
-        val trigger = Trigger.boss(mobId)
-        when (category) {
-            BossCategory.CHECKPOINT -> {
-                RecordStore.appendEvent(
-                    server,
-                    state.challengeId,
-                    RecordEvent.save(elapsed, Instant.now().toString(), name, trigger),
-                )
-            }
-            BossCategory.CLEAR -> {
-                RecordStore.appendEvent(
-                    server,
-                    state.challengeId,
-                    RecordEvent.clear(elapsed, Instant.now().toString(), trigger),
-                )
-                state.setRunning(false)
-                GateClient.sendRunningChanged(false)
-            }
-            BossCategory.NONE -> Unit
+        if (!completed) {
+            HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' did not complete in time; continuing anyway")
         }
     }
 
@@ -171,5 +136,10 @@ object DeathHandler {
         player.connection.send(ClientboundSetTitlesAnimationPacket(fadeIn, stay, fadeOut))
         player.connection.send(ClientboundSetTitleTextPacket(title))
         player.connection.send(ClientboundSetSubtitleTextPacket(subtitle))
+    }
+
+    companion object {
+        private const val COUNTDOWN_SECONDS = 10
+        private const val COUNTDOWN_TICKS = COUNTDOWN_SECONDS * 20
     }
 }

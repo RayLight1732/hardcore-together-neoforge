@@ -1,4 +1,4 @@
-package com.ray.light.hardcoretogether.gate
+package com.ray.light.hardcoretogether.adapter.gate
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -9,25 +9,23 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.concurrent.thread
 
 /**
- * Spec 5 / 5.1: persistent TCP socket to Gate, one NDJSON line per message. The MOD
- * connects out (Gate is the long-lived side); the same connection carries every signal
- * in both directions for the lifetime of this server process.
+ * Spec 5 / 5.1: persistent TCP socket to Gate, one NDJSON line per message. The MOD connects
+ * out (Gate is the long-lived side); the same connection carries every signal in both
+ * directions for the lifetime of this server process.
+ *
+ * This class only knows the wire protocol - it has no MinecraftServer dependency and no
+ * knowledge of save-off/save-on. That bracket is a separate local-server concern owned by
+ * ArchiveGatewayImpl, which composes this class.
  */
-object GateClient {
-    private val GSON = Gson()
-    private const val HOST = "127.0.0.1"
-    private val PORT: Int = System.getProperty("hardcoretogether.gate.port", "25585").toInt()
-    private const val CONNECT_RETRIES = 5
-    private const val CONNECT_RETRY_DELAY_MS = 2000L
-    private const val ARCHIVE_COMPLETE_TIMEOUT_SECONDS = 60L
-
+class TcpGateConnection {
+    private val gson = Gson()
     private var socket: Socket? = null
     private var writer: PrintWriter? = null
     private val pendingArchiveCompletions = ConcurrentHashMap<String, CompletableFuture<Void?>>()
@@ -82,7 +80,7 @@ object GateClient {
             HardcoreTogether.LOGGER.warn("Not connected to Gate, dropping message: $obj")
             return
         }
-        w.println(GSON.toJson(obj))
+        w.println(gson.toJson(obj))
     }
 
     fun sendReady(running: Boolean) {
@@ -99,10 +97,7 @@ object GateClient {
         })
     }
 
-    /**
-     * Spec 2.5 step 3-5: sends archive-request and blocks until the matching
-     * archive-complete arrives (or the timeout elapses). Returns whether it completed.
-     */
+    /** Sends archive-request and blocks until the matching archive-complete arrives (or times out). */
     fun sendArchiveRequestAndAwait(name: String, elapsedTime: Long, createdAt: String): Boolean {
         val future = CompletableFuture<Void?>()
         pendingArchiveCompletions[name] = future
@@ -120,5 +115,13 @@ object GateClient {
             HardcoreTogether.LOGGER.error("Timed out waiting for archive-complete for '$name'")
             false
         }
+    }
+
+    companion object {
+        private const val HOST = "127.0.0.1"
+        private val PORT: Int = System.getProperty("hardcoretogether.gate.port", "25585").toInt()
+        private const val CONNECT_RETRIES = 5
+        private const val CONNECT_RETRY_DELAY_MS = 2000L
+        private const val ARCHIVE_COMPLETE_TIMEOUT_SECONDS = 60L
     }
 }

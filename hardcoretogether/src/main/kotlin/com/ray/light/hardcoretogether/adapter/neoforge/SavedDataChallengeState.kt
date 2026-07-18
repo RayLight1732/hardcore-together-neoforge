@@ -1,5 +1,6 @@
-package com.ray.light.hardcoretogether.state
+package com.ray.light.hardcoretogether.adapter.neoforge
 
+import com.ray.light.hardcoretogether.port.ChallengeState
 import net.minecraft.core.HolderLookup
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.server.MinecraftServer
@@ -11,23 +12,18 @@ import java.util.UUID
  * naturally rewinds with /load). Elapsed time and the dead-player UUID are deliberately NOT
  * stored here (see spec 4.1 / 4.5 for why).
  */
-class ChallengeState private constructor(
+class SavedDataChallengeState private constructor(
     running: Boolean,
-    challengeId: String,
-) : SavedData() {
+    override val challengeId: String,
+) : SavedData(), ChallengeState {
 
-    var running: Boolean = running
-        private set
-
-    var challengeId: String = challengeId
-        private set
-
-    fun setRunning(value: Boolean) {
-        if (running != value) {
-            running = value
-            setDirty()
+    override var running: Boolean = running
+        set(value) {
+            if (field != value) {
+                field = value
+                setDirty()
+            }
         }
-    }
 
     override fun save(tag: CompoundTag, registries: HolderLookup.Provider): CompoundTag {
         tag.putBoolean("running", running)
@@ -39,17 +35,17 @@ class ChallengeState private constructor(
         private const val ID = "hardcoretogether_challenge"
 
         // Spec 4.1: running defaults to true on fresh creation (a brand new /start challenge).
-        private fun create(): ChallengeState = ChallengeState(running = true, challengeId = UUID.randomUUID().toString())
+        private fun create(): SavedDataChallengeState = SavedDataChallengeState(running = true, challengeId = UUID.randomUUID().toString())
 
-        private fun load(tag: CompoundTag, registries: HolderLookup.Provider): ChallengeState =
-            ChallengeState(
+        private fun load(tag: CompoundTag, registries: HolderLookup.Provider): SavedDataChallengeState =
+            SavedDataChallengeState(
                 running = tag.getBoolean("running"),
                 challengeId = tag.getString("challengeId"),
             )
 
         private val FACTORY = Factory(::create, ::load)
 
-        fun get(server: MinecraftServer): ChallengeState =
+        fun get(server: MinecraftServer): SavedDataChallengeState =
             server.overworld().dataStorage.computeIfAbsent(FACTORY, ID)
     }
 }
