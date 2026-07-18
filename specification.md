@@ -47,6 +47,7 @@ flowchart TB
         G6[ready / archive-request / running-changed 受信リスナー]
         G7[hardcore状態管理<br/>停止中/起動処理中/準備完了]
         G8[hardcoreのrunningキャッシュ<br/>true中は/start・/loadを拒否]
+        G9["/savedata, /senpan コマンド<br/>(records/*.jsonを直接読み取り、MOD非経由)"]
     end
 
     subgraph Lobby["lobbyサーバー (NeoForge)"]
@@ -54,7 +55,7 @@ flowchart TB
     end
 
     subgraph Hardcore["hardcoreサーバー (NeoForge)"]
-        H1["/archive, /savedata, /senpan コマンド"]
+        H1["/archive コマンド"]
         H2[死亡/討伐イベント処理]
         H3[running状態をSavedDataへ永続化]
         H4[起動完了・archive要求・running変化をGateへ通知]
@@ -68,6 +69,7 @@ flowchart TB
     G6 --> G8
     G5 -->|archive-complete| H4
     G4 -->|プロセス起動/停止| Hardcore
+    G9 -.->|records/*.json 直接読み取り| Hardcore
 ```
 
 ## 2. Gate仕様
@@ -131,6 +133,19 @@ Gateはhardcoreサーバーの状態を内部で3値管理する。
 4. Gateがファイルコピーを実行し、完了したら`archive-complete`をMODへ返す
 5. MODが`archive-complete`受信で`save-on`（オートセーブ再開）
 
+`/archive`コマンド自体は4.2節の通りhardcore MODが直接持つ（Gateを経由しない）。理由は次節参照。
+
+### 2.6 挑戦記録の参照コマンド（Gateレベル、どこからでも使用可能）
+
+| コマンド | 権限 | 動作 |
+|---|---|---|
+| `/savedata` | 誰でも | hardcoreサーバーの起動有無に関わらず、Gateが4.5節の`records/<challengeId>.json`を（Gate・hardcoreが同一ホスト上にあるという1節の前提のもと）直接読み取り、全`challengeId`分横断して一覧表示する。MODへの問い合わせは行わない |
+| `/senpan list\|count` | 誰でも | 同上の直接読み取りにより、全`challengeId`のイベントログから`type: death`のイベントを集計し、戦犯（死亡したプレイヤー）の一覧・回数を表示する |
+
+`/savedata`・`/senpan`をMODへ問い合わせず、Gateが`records/`を直接読む設計にした理由は2つ：①Gateとhardcoreは同一ホスト上にある前提（1節・2.5節）なので、ファイルI/Oだけで完結できプロトコルを増やす必要がない、②hardcoreサーバーが停止中でも過去の挑戦記録を閲覧できる方が実用上望ましいため。
+
+**`/archive`はこの方式にしない**：`/archive`は「オートセーブを一時停止する」という**稼働中のMinecraftサーバープロセスでしか実行できない操作**を必ず伴うため、実行者がhardcoreに接続している必要が実質的にある（hardcoreが起動していなければ何もできない）。これをGate経由の中継にすると、①新規シグナルの追加、②Gate中継メッセージをMOD側で受けた際に生じるスレッド設計上の注意点（受信スレッドで直接ブロッキング処理を行うとデッドロックしうる）、③hardcoreに繋いでいないかもしれない実行者へGateがメッセージを送る仕組み、が必要になり、得られる利便性（hardcoreに繋がずに手動アーカイブできる）に見合わない複雑さになると判断した。そのため`/archive`は4.2節の通りhardcore MODが直接登録する、従来通りの設計に留める。
+
 ## 3. Lobbyサーバー仕様（Parkour Lobby、NeoForge）
 
 チェックポイント機能のみ。
@@ -183,10 +198,10 @@ Gateはhardcoreサーバーの状態を内部で3値管理する。
 | コマンド | 権限 | 動作 |
 |---|---|---|
 | `/archive <name>` | OP | `save-off`→`save-all flush`を実行後、Gateへ`archive-request(name, elapsedTime, createdAt)`を送信。**`name`が既存アーカイブと重複する場合はGateに拒否され、OPへエラー表示して終了**（`save-on`のみ実行して中断）。成功時は`archive-complete`受信後に`save-on`で再開。サーバープロセスは止めない。あわせて4.5節のイベントログへ`type: save`（トリガー：実行したOP）を追記する |
-| `/savedata` | 誰でも | 4.5節の挑戦記録ファイル（`challengeId`ごとに分かれたイベントログ、アーカイブとは独立）を全`challengeId`分横断して一覧表示 |
-| `/senpan list\|count` | 誰でも | 全`challengeId`のイベントログから`type: death`のイベントを集計し、戦犯（死亡したプレイヤー）の一覧・回数を表示 |
 
-`/start`・`/load`はhardcore MODには持たせない（Gateレベルのコマンドとして2.1節に記載。理由：hardcoreサーバーが未起動の状態でも呼び出せる必要があるため）。旧`/rta`（同一プロセス内での複数ワールド間テレポート）は廃止（lobby/hardcoreが別プロセスになったため不要）。
+`/start`・`/load`はhardcore MODには持たせない（Gateレベルのコマンドとして2.1節に記載。理由：hardcoreサーバーが未起動の状態でも呼び出せる必要があるため）。`/savedata`・`/senpan`も同様にhardcore MODには持たせず、Gateが直接読み取る（2.6節。理由：hardcore停止中・他バックエンド接続中でも使えるようにするため）。
+
+一方`/archive`はhardcore MODが直接持つ（Gateへ中継しない）。`/archive`は稼働中のMinecraftサーバープロセスでしか実行できない操作（オートセーブの一時停止）を必ず伴うため、「hardcoreに接続していなくても実行できる」という利点が実質的に無く、Gate中継に伴う複雑さ（新規シグナル、受信スレッドでのデッドロック回避、hardcoreに繋いでいない実行者へのメッセージ配送）に見合わないと判断した（2.5節参照）。旧`/rta`（同一プロセス内での複数ワールド間テレポート）は廃止（lobby/hardcoreが別プロセスになったため不要）。
 
 ### 4.3 ゲームプレイ仕様
 
@@ -245,8 +260,10 @@ clear = [
 **ファイル配置**
 
 - **`challengeId`ごとに1ファイル**を作成する（単一ファイルへの集約はしない）。例：`records/<challengeId>.json`
-- 配置場所はhardcoreサーバーの**作業ディレクトリ内、`world/`（セーブフォルダ）と同階層の`records/`フォルダ**（例：`<hardcoreサーバー作業ディレクトリ>/records/<challengeId>.json`）。Gateが`/start`時に削除するのは`world/`のみなので、`records/`は影響を受けない。archive/（Gate管理、hardcoreサーバーの作業ディレクトリの外）とは別の場所である点に注意（9節参照）
-- Gateを経由しない。hardcore MODがサーバープロセス内で直接読み書きするローカルファイルI/Oで完結する（5節の`archive-request`/`archive-complete`とは無関係）
+- 配置場所はhardcore MODの設定ファイル（`storage.recordsDir`、デフォルト値`records`）で指定する。相対パスはhardcoreサーバーの作業ディレクトリ基準（デフォルトなら`<hardcoreサーバー作業ディレクトリ>/records/<challengeId>.json`、`world/`と同階層）、絶対パスはそのまま使う。Gateが`/start`時に削除するのは`world/`のみなので、この場所は影響を受けない。archive/（Gate管理、hardcoreサーバーの作業ディレクトリの外）とは別の場所である点に注意（9節参照）
+- **書き込み**はhardcore MODがサーバープロセス内で直接行うローカルファイルI/Oで完結し、Gateを経由しない（5節の`archive-request`/`archive-complete`とは無関係）
+- **読み取り**（`/savedata`・`/senpan`、2.6節）はhardcore MODを経由せず、Gateが同一ホスト前提でこのファイルを直接読み取る。書き込み側と読み取り側で経路が異なる点に注意
+- **設定を分ける2つのプロセスが同じ場所を見る必要がある**：`storage.recordsDir`はhardcore MOD自身の設定ファイルの値だが、Gateも同じ場所を読みに行く（2.6節）ため、Gate側の設定（例：`config.yml`の対応する値）と必ず一致させる必要がある。値を変更する場合は両方を同時に更新すること
 
 **ファイル構造**
 
@@ -296,6 +313,8 @@ clear = [
 
 - `/savedata`：全`challengeId`のファイルを横断して、`save`/`death`/`clear`イベントの一覧を表示
 - `/senpan list|count`：全`challengeId`のファイルから`type: death`のイベントを集計し、`deadPlayer`ごとの一覧・回数を表示
+
+（いずれも2.6節の通りGateが直接ファイルを読み取って実現する。hardcoreサーバーの起動有無に関わらず参照可能）
 
 **例（ご指摘の例に対応）**
 
@@ -355,8 +374,8 @@ Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、こ�
 | `/server` | Gate | 権限保有者のみ表示 |
 | `/checkpoint` 系 | lobby MOD | 誰でも／一部OP相当権限 |
 | `/archive <name>` | hardcore MOD（hardcore接続中のみ） | OP |
-| `/savedata` | hardcore MOD（hardcore接続中のみ） | 誰でも |
-| `/senpan list\|count` | hardcore MOD（hardcore接続中のみ） | 誰でも |
+| `/savedata` | Gate（どこからでも。hardcore停止中も可、`records/`を直接読み取り） | 誰でも |
+| `/senpan list\|count` | Gate（どこからでも。hardcore停止中も可、`records/`を直接読み取り） | 誰でも |
 
 ## 7. 決定ログ
 
@@ -392,6 +411,9 @@ Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、こ�
 - プロジェクト名を確定：hardcoreサーバーのMODは**Hardcore Together**（連帯責任を表す。特定MODに依存しない汎用フレームワークのため固有名詞は含めない）、lobbyサーバーのMODは**Parkour Lobby**（チェックポイントはパルクールコースの中間セーブという位置づけ）、プロキシは**Hardcore Together Gate**
 - 両MODとも**サーバーサイドのみで完結**させる。クライアント側へのMOD導入は不要とし、カスタム`Item`/`Block`登録は行わない。Parkour Lobbyのチェックポイント用アイテム・看板はバニラのアイテム/看板ブロックに`minecraft:custom_data`でフラグを付与する方式に変更した
 - MOD⇔Gate間シグナルの通信方式を確定：永続TCPソケット＋NDJSON（改行区切りJSON）。Gateの組み込みAPI（`GateService`）はプロキシ管理専用の固定APIでHardcore Together独自シグナルには使えないため、専用の軽量ソケットを別途用意する。protobuf/ConnectRPCは今回の規模（シグナル4種）にはオーバースペックと判断し不採用
+- 【修正】`/savedata`・`/senpan`を、hardcore MODレベル（hardcore接続中のみ実行可）からGateレベル（どこからでも実行可能、2.6節）へ変更した。Gateが`records/<challengeId>.json`を（Gate・hardcoreが同一ホスト上にあるという1節の前提のもと）直接読み取ることで実現し、hardcore停止中でも閲覧可能にした
+- 【検討の上、不採用】`/archive`も同様にGateレベルへ移し、Gateがhardcore MODへ新設シグナルを中継する案を一時検討したが、不採用とした。`/archive`は稼働中のMinecraftサーバープロセスでしか実行できない操作（オートセーブの一時停止）を必ず伴うため「hardcoreに接続していなくても実行できる」利点が実質的に無く、中継のために必要になる複雑さ（新規シグナル2種、Gate接続の受信スレッドで直接処理するとブロッキングによりデッドロックしうる問題への対処、hardcoreに繋いでいない実行者へのメッセージ配送）に見合わなかった。`/archive`は引き続きhardcore MODレベルの直接コマンドのまま維持する（4.2節）
+- `records/`の配置パスをhardcore MODの設定ファイル（`storage.recordsDir`、デフォルト`records`）から指定できるようにした。理由：このパスはhardcore MOD（書き込み）とGate（`/savedata`・`/senpan`用の読み取り、2.6節）という2つの別プロセスが同じ場所を見に行く必要がある、プロセスをまたいで読まれる唯一のデータであるため。値を変える場合はGate側の設定も同時に更新する必要がある（4.5節）
 
 ## 8. 未決事項
 
@@ -401,6 +423,7 @@ Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、こ�
 - lobby/hardcore間でのコード共有（commonモジュール化）の要否
 - ボスMobの具体的なリストと、チェックポイント系/挑戦終了系それぞれへの分類（黄昏の森のどのボスをどちらにするか）
 - `hardcoretogether`のテンプレート由来の`ModBlocks.kt`（`example_block`というカスタムBlockを登録）は「サーバーサイドのみで完結する」制約に反するため、実装時に削除する必要がある
+- **既存の抜け**：`archive-request`が名前重複でGateに拒否された場合、それを明示的にMODへ伝えるシグナルが5節に存在しない（MODは`archive-complete`が来ないことによる60秒タイムアウトでしか失敗を検知できない）。OPへのエラー表示がこの60秒待ちに引きずられる形になる。将来的に`archive-rejected`のような即時拒否シグナルを追加して解消するのが望ましいが、今回は既存の挙動を変えない範囲に留めた
 
 ## 9. ディレクトリ構成
 
@@ -411,7 +434,8 @@ Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、こ�
 ├── world/                                   … セーブフォルダ。/startで削除・再生成される対象
 │   ├── data/                                … SavedData（running・challengeId。4.1節）
 │   └── ...                                  … region, playerdata等、標準NeoForgeサーバー構成
-├── records/                                 … MOD管理。/startでも削除されない（4.5節）
+├── records/                                 … MOD管理。/startでも削除されない（4.5節）。パスはMODの
+│   │                                          storage.recordsDir設定で変更可（デフォルトがこの位置）
 │   └── <challengeId>.json                   … 挑戦ごとのイベントログ
 ├── mods/, config/, server.properties 等     … 標準NeoForgeサーバー構成（本仕様の対象外）
 
@@ -432,7 +456,7 @@ Gateには`GateService`という組み込みのgRPC/HTTP APIがあるが、こ�
 | パス | 管理主体 | 内容 | `/start`での扱い |
 |---|---|---|---|
 | `<hardcore>/world/` | hardcoreサーバー本体（バニラ/NeoForge） | ワールドの実データ＋`SavedData` | 削除・再生成される |
-| `<hardcore>/records/` | hardcore MOD | 挑戦ごとのイベントログ（JSON） | 削除されない |
+| `<hardcore>/records/`（`storage.recordsDir`で変更可） | hardcore MOD（書き込み）／Gate（`/savedata`・`/senpan`用の読み取りのみ、2.6節） | 挑戦ごとのイベントログ（JSON） | 削除されない |
 | `<Gate>/<archiveDir>/<name>/` | Gate | アーカイブされたワールドの複製＋メタデータ | 対象外（Gate管理のため） |
 | `<lobby>/world/playerdata/` | lobby MOD（バニラ機構経由） | チェックポイント座標 | 対象外（別サーバー） |
 
