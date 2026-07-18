@@ -100,7 +100,7 @@ object DeathHandler {
 
         for (p in server.playerList.players) {
             sendTitle(p, Component.literal(player.gameProfile.name), Component.literal("が死亡...！"), 0, 40, 10)
-            p.playNotifySound(SoundEvents.PLAYER_HURT.value(), SoundSource.MASTER, 1f, 0.8f)
+            p.playNotifySound(SoundEvents.PLAYER_HURT, SoundSource.MASTER, 1f, 0.8f)
         }
 
         countdownActive = true
@@ -121,7 +121,7 @@ object DeathHandler {
                 p.setGameMode(GameType.SPECTATOR)
             }
             sendTitle(p, Component.literal("全滅！"), Component.literal("/lobbyで退出"), 0, 120, 10)
-            p.playNotifySound(SoundEvents.ENDER_DRAGON_DEATH.value(), SoundSource.MASTER, 1f, 1f)
+            p.playNotifySound(SoundEvents.ENDER_DRAGON_DEATH, SoundSource.MASTER, 1f, 1f)
         }
 
         val state = ChallengeState.get(server)
@@ -134,7 +134,7 @@ object DeathHandler {
         val player = server.playerList.respawn(oldPlayer, false, Entity.RemovalReason.KILLED)
         player.setGameMode(GameType.SPECTATOR)
         player.foodData.foodLevel = 20
-        player.foodData.saturationLevel = 5f
+        player.foodData.setSaturation(5f)
     }
 
     private fun handleBossKill(server: MinecraftServer, state: ChallengeState, mobId: String, category: BossCategory) {

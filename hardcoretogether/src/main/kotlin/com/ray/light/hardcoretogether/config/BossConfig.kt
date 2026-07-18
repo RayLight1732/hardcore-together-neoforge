@@ -12,7 +12,7 @@ enum class BossCategory { CHECKPOINT, CLEAR, NONE }
 object BossConfig {
     private val BUILDER = ModConfigSpec.Builder()
 
-    private val CHECKPOINT_BOSSES: ModConfigSpec.ConfigValue<List<out String>> = BUILDER
+    private val CHECKPOINT_BOSSES: ModConfigSpec.ConfigValue<List<String>> = BUILDER
         .comment("Mobs that trigger an automatic checkpoint save when killed. The challenge keeps running.")
         .defineListAllowEmpty(
             listOf("bosses", "checkpoint"),
@@ -24,14 +24,16 @@ object BossConfig {
                     "twilightforest:knight_phantom",
                 )
             },
+            { "" },
             { it is String },
         )
 
-    private val CLEAR_BOSSES: ModConfigSpec.ConfigValue<List<out String>> = BUILDER
+    private val CLEAR_BOSSES: ModConfigSpec.ConfigValue<List<String>> = BUILDER
         .comment("Mobs that trigger an automatic archive and end the challenge as a clear when killed.")
         .defineListAllowEmpty(
             listOf("bosses", "clear"),
             { listOf("twilightforest:ur_ghast", "twilightforest:alpha_yeti") },
+            { "" },
             { it is String },
         )
 
