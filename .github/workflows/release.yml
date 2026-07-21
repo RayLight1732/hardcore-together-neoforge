@@ -30,7 +30,10 @@ jobs:
           gradle-version: wrapper
 
       - name: Build mod jar
-        run: gradle build --no-daemon
+        # Overrides gradle.properties's mod_version with the pushed tag (minus
+        # its leading "v") so the jar version always matches the release tag
+        # without needing to keep gradle.properties in sync by hand.
+        run: gradle build --no-daemon -Pmod_version="${GITHUB_REF_NAME#v}"
 
       - name: Attach jar to the GitHub Release
         uses: softprops/action-gh-release@v2
