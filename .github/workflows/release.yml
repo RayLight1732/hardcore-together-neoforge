@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Reads the version from gradle/wrapper/gradle-wrapper.properties's
+          # distributionUrl directly, so there's nothing to keep in sync here
+          # even though gradlew itself isn't committed.
+          gradle-version: wrapper
+
+      - name: Build mod jar
+        run: gradle build --no-daemon
+
+      - name: Attach jar to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/hardcoretogether-*.jar
