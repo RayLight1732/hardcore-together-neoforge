@@ -1,0 +1,19 @@
+name: Docs sync check
+
+on:
+  push:
+  pull_request:
+    types: [ opened, reopened ]
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refresh docs from hardcore-together-docs
+        run: make docs
+
+      - name: Fail if docs/ is out of sync with hardcore-together-docs
+        run: git diff --exit-code docs/
