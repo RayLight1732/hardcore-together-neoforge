@@ -54,6 +54,18 @@ object HardcoreConfig {
         )
         .define("storage.recordsDir", "records")
 
+    /**
+     * Spec 5 / 5.1: the MOD connects out to Gate over localhost TCP; this is the port Gate
+     * listens on. Both sides must agree on this value - if changed here, Gate's own
+     * configuration for the port it listens on must be updated to match.
+     */
+    private val GATE_PORT: ModConfigSpec.IntValue = BUILDER
+        .comment(
+            "Port to connect to the Hardcore Together Gate on (localhost only).",
+            "Gate listens on this same port, so if you change this, update Gate's own configuration to match.",
+        )
+        .defineInRange("gate.port", 25585, 1, 65535)
+
     val SPEC: ModConfigSpec = BUILDER.build()
 
     fun categoryOf(mobId: String): BossCategory = when {
@@ -63,4 +75,6 @@ object HardcoreConfig {
     }
 
     fun recordsDir(): String = RECORDS_DIR.get()
+
+    fun gatePort(): Int = GATE_PORT.get()
 }

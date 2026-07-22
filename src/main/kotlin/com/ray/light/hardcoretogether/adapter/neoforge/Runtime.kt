@@ -2,6 +2,7 @@ package com.ray.light.hardcoretogether.adapter.neoforge
 
 import com.ray.light.hardcoretogether.adapter.file.FileRecordRepository
 import com.ray.light.hardcoretogether.adapter.gate.ArchiveGatewayImpl
+import com.ray.light.hardcoretogether.adapter.gate.TcpGateConnection
 import com.ray.light.hardcoretogether.application.ArchiveService
 import com.ray.light.hardcoretogether.application.ChallengeApplicationService
 import com.ray.light.hardcoretogether.application.ChallengeService
@@ -42,7 +43,7 @@ class Runtime private constructor(
         fun create(server: MinecraftServer): Runtime {
             val challengeState = SavedDataChallengeState.get(server)
             val recordRepository = FileRecordRepository(resolveRecordsDir(server))
-            val archiveGateway = ArchiveGatewayImpl(server)
+            val archiveGateway = ArchiveGatewayImpl(server, TcpGateConnection(HardcoreConfig.gatePort()))
 
             val challenge = Challenge(
                 id = challengeState.challengeId,

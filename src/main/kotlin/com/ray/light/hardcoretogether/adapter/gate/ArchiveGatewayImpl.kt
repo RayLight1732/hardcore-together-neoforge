@@ -12,7 +12,7 @@ import java.time.Instant
  */
 class ArchiveGatewayImpl(
     private val server: MinecraftServer,
-    private val connection: TcpGateConnection = TcpGateConnection(),
+    private val connection: TcpGateConnection,
 ) : ArchiveGateway {
 
     override fun connect() = connection.connect()
