@@ -24,7 +24,7 @@ import kotlin.concurrent.thread
  * knowledge of save-off/save-on. That bracket is a separate local-server concern owned by
  * ArchiveGatewayImpl, which composes this class.
  */
-class TcpGateConnection {
+class TcpGateConnection(private val port: Int = DEFAULT_PORT) {
     private val gson = Gson()
     private var socket: Socket? = null
     private var writer: PrintWriter? = null
@@ -33,11 +33,11 @@ class TcpGateConnection {
     fun connect() {
         repeat(CONNECT_RETRIES) { attempt ->
             try {
-                val s = Socket(HOST, PORT)
+                val s = Socket(HOST, port)
                 socket = s
                 writer = PrintWriter(s.getOutputStream(), true)
                 startReaderThread(s)
-                HardcoreTogether.LOGGER.info("Connected to Hardcore Together Gate at $HOST:$PORT")
+                HardcoreTogether.LOGGER.info("Connected to Hardcore Together Gate at $HOST:$port")
                 return
             } catch (e: IOException) {
                 HardcoreTogether.LOGGER.warn("Gate connection attempt ${attempt + 1}/$CONNECT_RETRIES failed: ${e.message}")
@@ -119,7 +119,7 @@ class TcpGateConnection {
 
     companion object {
         private const val HOST = "127.0.0.1"
-        private val PORT: Int = System.getProperty("hardcoretogether.gate.port", "25585").toInt()
+        private const val DEFAULT_PORT = 25585
         private const val CONNECT_RETRIES = 5
         private const val CONNECT_RETRY_DELAY_MS = 2000L
         private const val ARCHIVE_COMPLETE_TIMEOUT_SECONDS = 60L
