@@ -16,7 +16,6 @@ import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
-import net.minecraft.world.entity.Entity
 import net.minecraft.world.level.GameType
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent
 
@@ -32,7 +31,6 @@ class DeathCountdown(
 ) {
     private var countdownActive = false
     private var countdownTicksRemaining = 0
-    private var pendingRespawn: ServerPlayer? = null
 
     fun onLivingDeath(event: LivingDeathEvent) {
         val level = event.entity.level() as? ServerLevel ?: return
@@ -54,11 +52,6 @@ class DeathCountdown(
 
     /** Call once per server tick from Runtime.onServerTick. */
     fun onServerTick(server: MinecraftServer) {
-        pendingRespawn?.let { player ->
-            resetAndSpectate(server, player)
-            pendingRespawn = null
-        }
-
         if (!countdownActive) return
 
         if (countdownTicksRemaining % 20 == 0) {
@@ -72,17 +65,27 @@ class DeathCountdown(
     }
 
     private fun handlePlayerDeath(server: MinecraftServer, player: ServerPlayer, event: LivingDeathEvent) {
-        // Spec 4.3 step 1: force a spectator respawn next tick, regardless of whether this
-        // death is the one that starts the wipe countdown.
-        pendingRespawn = player
+        // Spec 4.3 step 1: cancel the vanilla death entirely (no drops, no respawn-screen
+        // round trip) and switch the same entity to spectator in place. This must happen
+        // synchronously, before this tick's entity-data sync reaches the client - the health
+        // value was already dropped to <=0 by the damage that triggered this event, and once a
+        // sync packet carrying that value reaches the client it renders the death screen, whose
+        // "respawn" button is the very thing that trips vanilla's hardcore ban (see spec 5.3).
+        // Restoring health here, before that sync happens, means the client never sees it.
+        event.isCanceled = true
+        val deathMessage = player.combatTracker.deathMessage
+        server.playerList.broadcastSystemMessage(deathMessage, false)
+        player.setHealth(player.maxHealth)
+        player.foodData.foodLevel = 20
+        player.foodData.setSaturation(5f)
+        player.setGameMode(GameType.SPECTATOR)
 
         // Spec 4.3 step 2: only the first death of a wipe is recorded / starts the countdown.
         if (countdownActive) return
 
-        val killLog = event.source.getLocalizedDeathMessage(player).string
         applicationService.onPlayerDeath(
             PlayerRef(player.stringUUID, player.gameProfile.name),
-            killLog,
+            deathMessage.string,
         )
 
         for (p in server.playerList.players) {
@@ -110,14 +113,6 @@ class DeathCountdown(
             sendTitle(p, Component.literal("全滅！"), Component.literal("/lobbyで退出"), 0, 120, 10)
             p.playNotifySound(SoundEvents.ENDER_DRAGON_DEATH, SoundSource.MASTER, 1f, 1f)
         }
-    }
-
-    private fun resetAndSpectate(server: MinecraftServer, oldPlayer: ServerPlayer) {
-        // PlayerList#respawn returns a NEW ServerPlayer instance; oldPlayer is no longer valid after this.
-        val player = server.playerList.respawn(oldPlayer, false, Entity.RemovalReason.KILLED)
-        player.setGameMode(GameType.SPECTATOR)
-        player.foodData.foodLevel = 20
-        player.foodData.setSaturation(5f)
     }
 
     private fun handleBossKill(mobId: String, category: BossCategory) {
