@@ -35,7 +35,12 @@ class SavedDataChallengeState private constructor(
         private const val ID = "hardcoretogether_challenge"
 
         // Spec 4.1: running defaults to true on fresh creation (a brand new /start challenge).
-        private fun create(): SavedDataChallengeState = SavedDataChallengeState(running = true, challengeId = UUID.randomUUID().toString())
+        // setDirty() must be called explicitly: the primary constructor's parameter initializer
+        // assigns the backing field directly and bypasses the `running` setter below, so without
+        // this the SavedData is never marked dirty and world/data/hardcoretogether_challenge.dat
+        // is never written until the challenge ends.
+        private fun create(): SavedDataChallengeState =
+            SavedDataChallengeState(running = true, challengeId = UUID.randomUUID().toString()).apply { setDirty() }
 
         private fun load(tag: CompoundTag, registries: HolderLookup.Provider): SavedDataChallengeState =
             SavedDataChallengeState(
