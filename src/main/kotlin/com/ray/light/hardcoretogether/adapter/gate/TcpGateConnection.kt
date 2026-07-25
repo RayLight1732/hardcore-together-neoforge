@@ -4,11 +4,13 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.ray.light.hardcoretogether.HardcoreTogether
+import com.ray.light.hardcoretogether.port.ArchiveResult
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -28,7 +30,13 @@ class TcpGateConnection(private val port: Int = DEFAULT_PORT) {
     private val gson = Gson()
     private var socket: Socket? = null
     private var writer: PrintWriter? = null
-    private val pendingArchiveCompletions = ConcurrentHashMap<String, CompletableFuture<Void?>>()
+
+    /**
+     * protocol-mod-manager.md 1節・3.3〜3.5節：archive-request/archive-complete/archive-rejectedは
+     * requestId（UUID）で相関する。同一接続上で複数のarchive-requestが並行して未処理になりうる
+     * （手動/archive実行中に自動アーカイブが割り込む等）ため、nameや到着順には頼らない。
+     */
+    private val pendingArchiveResponses = ConcurrentHashMap<String, CompletableFuture<ArchiveResult>>()
 
     fun connect() {
         repeat(CONNECT_RETRIES) { attempt ->
@@ -69,8 +77,13 @@ class TcpGateConnection(private val port: Int = DEFAULT_PORT) {
         val json = JsonParser.parseString(line).asJsonObject
         when (json.get("type")?.asString) {
             "archive-complete" -> {
-                val name = json.get("name").asString
-                pendingArchiveCompletions.remove(name)?.complete(null)
+                val requestId = json.get("requestId").asString
+                pendingArchiveResponses.remove(requestId)?.complete(ArchiveResult.Success)
+            }
+            "archive-rejected" -> {
+                val requestId = json.get("requestId").asString
+                val reason = json.get("reason").asString
+                pendingArchiveResponses.remove(requestId)?.complete(ArchiveResult.Rejected(reason))
             }
         }
     }
@@ -97,23 +110,27 @@ class TcpGateConnection(private val port: Int = DEFAULT_PORT) {
         })
     }
 
-    /** Sends archive-request and blocks until the matching archive-complete arrives (or times out). */
-    fun sendArchiveRequestAndAwait(name: String, elapsedTime: Long, createdAt: String): Boolean {
-        val future = CompletableFuture<Void?>()
-        pendingArchiveCompletions[name] = future
+    /**
+     * Sends archive-request and blocks until the matching archive-complete/archive-rejected
+     * (same requestId) arrives, or times out (protocol-mod-manager.md 4節).
+     */
+    fun sendArchiveRequestAndAwait(name: String, elapsedTime: Long, createdAt: String): ArchiveResult {
+        val requestId = UUID.randomUUID().toString()
+        val future = CompletableFuture<ArchiveResult>()
+        pendingArchiveResponses[requestId] = future
         send(JsonObject().apply {
             addProperty("type", "archive-request")
+            addProperty("requestId", requestId)
             addProperty("name", name)
             addProperty("elapsedTime", elapsedTime)
             addProperty("createdAt", createdAt)
         })
         return try {
             future.get(ARCHIVE_COMPLETE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            true
         } catch (e: TimeoutException) {
-            pendingArchiveCompletions.remove(name)
-            HardcoreTogether.LOGGER.error("Timed out waiting for archive-complete for '$name'")
-            false
+            pendingArchiveResponses.remove(requestId)
+            HardcoreTogether.LOGGER.error("Timed out waiting for archive-complete/archive-rejected for '$name'")
+            ArchiveResult.TimedOut
         }
     }
 

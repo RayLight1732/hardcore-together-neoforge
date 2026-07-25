@@ -5,6 +5,7 @@ import com.ray.light.hardcoretogether.application.ChallengeApplicationService
 import com.ray.light.hardcoretogether.domain.BossCategory
 import com.ray.light.hardcoretogether.domain.BossTrigger
 import com.ray.light.hardcoretogether.domain.PlayerRef
+import com.ray.light.hardcoretogether.port.ArchiveResult
 import com.ray.light.hardcoretogether.port.ChallengeState
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
@@ -117,13 +118,17 @@ class DeathCountdown(
 
     private fun handleBossKill(mobId: String, category: BossCategory) {
         val trigger = BossTrigger(mobId)
-        val completed = when (category) {
+        val result = when (category) {
             BossCategory.CHECKPOINT -> applicationService.recordCheckpoint(trigger)
             BossCategory.CLEAR -> applicationService.recordClear(trigger)
             BossCategory.NONE -> return
         }
-        if (!completed) {
-            HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' did not complete in time; continuing anyway")
+        when (result) {
+            is ArchiveResult.Success -> {}
+            is ArchiveResult.Rejected ->
+                HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' was rejected: ${result.reason}; continuing anyway")
+            is ArchiveResult.TimedOut ->
+                HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' did not complete in time; continuing anyway")
         }
     }
 

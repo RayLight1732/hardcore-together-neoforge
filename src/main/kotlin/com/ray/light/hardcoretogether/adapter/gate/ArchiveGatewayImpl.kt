@@ -1,6 +1,7 @@
 package com.ray.light.hardcoretogether.adapter.gate
 
 import com.ray.light.hardcoretogether.port.ArchiveGateway
+import com.ray.light.hardcoretogether.port.ArchiveResult
 import net.minecraft.server.MinecraftServer
 import java.time.Instant
 
@@ -21,12 +22,12 @@ class ArchiveGatewayImpl(
 
     override fun sendRunningChanged(running: Boolean) = connection.sendRunningChanged(running)
 
-    override fun archive(name: String, elapsedTime: Long): Boolean {
+    override fun archive(name: String, elapsedTime: Long): ArchiveResult {
         dispatch("save-off")
         dispatch("save-all flush")
-        val completed = connection.sendArchiveRequestAndAwait(name, elapsedTime, Instant.now().toString())
+        val result = connection.sendArchiveRequestAndAwait(name, elapsedTime, Instant.now().toString())
         dispatch("save-on")
-        return completed
+        return result
     }
 
     private fun dispatch(command: String) {
