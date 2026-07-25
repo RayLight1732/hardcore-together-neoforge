@@ -3,6 +3,7 @@ package com.ray.light.hardcoretogether.adapter.neoforge
 import com.mojang.brigadier.arguments.StringArgumentType
 import com.ray.light.hardcoretogether.HardcoreTogether
 import com.ray.light.hardcoretogether.domain.ManualTrigger
+import com.ray.light.hardcoretogether.port.ArchiveResult
 import net.minecraft.commands.CommandSourceStack
 import net.minecraft.commands.Commands
 import net.minecraft.network.chat.Component
@@ -41,11 +42,16 @@ object CommandRegistrar {
             return 0
         }
         val elapsed = runtime.challengeService.elapsedSeconds()
-        val completed = runtime.archiveService.archive(name, elapsed)
-
-        if (!completed) {
-            source.sendFailure(Component.literal("アーカイブに失敗しました（名前の重複、またはGateからの応答がタイムアウトしました）: $name"))
-            return 0
+        when (val result = runtime.archiveService.archive(name, elapsed)) {
+            is ArchiveResult.Success -> {}
+            is ArchiveResult.Rejected -> {
+                source.sendFailure(Component.literal("アーカイブに失敗しました: ${result.reason}"))
+                return 0
+            }
+            is ArchiveResult.TimedOut -> {
+                source.sendFailure(Component.literal("アーカイブに失敗しました（Gateからの応答がタイムアウトしました）: $name"))
+                return 0
+            }
         }
 
         val triggerPlayer = (source.entity as? ServerPlayer)?.stringUUID ?: "console"
