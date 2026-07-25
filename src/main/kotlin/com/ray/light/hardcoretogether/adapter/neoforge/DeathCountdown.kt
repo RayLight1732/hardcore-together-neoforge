@@ -118,17 +118,21 @@ class DeathCountdown(
 
     private fun handleBossKill(mobId: String, category: BossCategory) {
         val trigger = BossTrigger(mobId)
-        val result = when (category) {
-            BossCategory.CHECKPOINT -> applicationService.recordCheckpoint(trigger)
-            BossCategory.CLEAR -> applicationService.recordClear(trigger)
-            BossCategory.NONE -> return
+        val onResult: (ArchiveResult) -> Unit = { result ->
+            when (result) {
+                is ArchiveResult.Success -> {}
+                is ArchiveResult.Rejected ->
+                    HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' was rejected: ${result.reason}; continuing anyway")
+                is ArchiveResult.TimedOut ->
+                    HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' did not complete in time; continuing anyway")
+                is ArchiveResult.NotConnected ->
+                    HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' failed: not connected to Gate; continuing anyway")
+            }
         }
-        when (result) {
-            is ArchiveResult.Success -> {}
-            is ArchiveResult.Rejected ->
-                HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' was rejected: ${result.reason}; continuing anyway")
-            is ArchiveResult.TimedOut ->
-                HardcoreTogether.LOGGER.error("Boss-kill archive for '$mobId' did not complete in time; continuing anyway")
+        when (category) {
+            BossCategory.CHECKPOINT -> applicationService.recordCheckpoint(trigger, onResult)
+            BossCategory.CLEAR -> applicationService.recordClear(trigger, onResult)
+            BossCategory.NONE -> return
         }
     }
 

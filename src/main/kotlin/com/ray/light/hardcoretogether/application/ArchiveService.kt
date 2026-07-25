@@ -7,15 +7,16 @@ import java.time.Instant
 /** アーカイブ名の採番とArchiveGatewayの呼び出し。 */
 class ArchiveService(private val gateway: ArchiveGateway) {
 
-    /** 自動アーカイブ（ボスキル等）用：名前を自前で採番し、結果も返す。 */
-    fun archiveWithGeneratedName(elapsedSeconds: Long): Pair<String, ArchiveResult> {
+    /** 自動アーカイブ（ボスキル等）用：名前を自前で採番してgatewayへ渡す。名前は同期的に返せる。 */
+    fun archiveWithGeneratedName(elapsedSeconds: Long, onResult: (ArchiveResult) -> Unit): String {
         val name = timestampName()
-        val result = gateway.archive(name, elapsedSeconds)
-        return name to result
+        gateway.archive(name, elapsedSeconds, onResult)
+        return name
     }
 
     /** 手動アーカイブ（/archiveコマンド）用：名前は呼び出し側が指定する。 */
-    fun archive(name: String, elapsedSeconds: Long): ArchiveResult = gateway.archive(name, elapsedSeconds)
+    fun archive(name: String, elapsedSeconds: Long, onResult: (ArchiveResult) -> Unit) =
+        gateway.archive(name, elapsedSeconds, onResult)
 
     private fun timestampName(): String =
         Instant.now().toString().replace(":", "-").substringBefore(".")

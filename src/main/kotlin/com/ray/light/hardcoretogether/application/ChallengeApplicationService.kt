@@ -26,18 +26,16 @@ class ChallengeApplicationService(
         }
     }
 
-    /** @return アーカイブの結果。呼び出し側はSuccess以外ならログ等でよい（記録自体は必ず行う）。 */
-    fun recordCheckpoint(trigger: Trigger): ArchiveResult {
-        val (name, result) = archiveService.archiveWithGeneratedName(challengeService.elapsedSeconds())
+    /** アーカイブ結果は`onResult`へ非同期に届く。呼び出し側はSuccess以外ならログ等でよい（記録自体は必ず行う）。 */
+    fun recordCheckpoint(trigger: Trigger, onResult: (ArchiveResult) -> Unit = {}) {
+        val name = archiveService.archiveWithGeneratedName(challengeService.elapsedSeconds(), onResult)
         recordService.appendSave(challengeService.id, challengeService.elapsedSeconds(), name, trigger)
-        return result
     }
 
-    fun recordClear(trigger: Trigger): ArchiveResult {
-        val (name, result) = archiveService.archiveWithGeneratedName(challengeService.elapsedSeconds())
+    fun recordClear(trigger: Trigger, onResult: (ArchiveResult) -> Unit = {}) {
+        val name = archiveService.archiveWithGeneratedName(challengeService.elapsedSeconds(), onResult)
         recordService.appendClear(challengeService.id, challengeService.elapsedSeconds(), trigger)
         endChallenge()
-        return result
     }
 
     fun onPlayerDeath(player: PlayerRef, killLog: String) {
