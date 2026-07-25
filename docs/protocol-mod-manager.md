@@ -169,4 +169,3 @@ sequenceDiagram
 
 - 接続リトライ回数・バックオフ設定値（`specification.md` 10節）
 - Managerが`running`値を永続化する状態ファイルの具体的なパス・フォーマット（`specification.md` 2.1節「プロセス状態と`running`の永続化」。`archiveDir`等と同様、Managerの設定ファイルで指定する想定だが未確定）
-- 【設計済み・実装未反映】**`/archive`コマンドの非同期化**：現状MOD側の`/archive`（および自動アーカイブ経路）はサーバーのメインスレッドで`archive-complete`/`archive-rejected`受信までブロックする同期実装になっている。`requestId`導入により複数の`archive-request`が並行して未処理でも相関できるようになったことを受け、send-and-forget＋コールバック方式への変更を設計として確定した（`architecture-neoforge.md`「`/archive`アーカイブ経路の非同期化」節）。ワイヤプロトコル自体（本書の内容）に変更は無く、MOD内部の実装のみが対象。実装は未着手
