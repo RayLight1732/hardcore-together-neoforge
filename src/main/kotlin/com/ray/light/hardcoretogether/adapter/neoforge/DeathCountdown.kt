@@ -7,6 +7,8 @@ import com.ray.light.hardcoretogether.domain.BossTrigger
 import com.ray.light.hardcoretogether.domain.PlayerRef
 import com.ray.light.hardcoretogether.port.ArchiveResult
 import com.ray.light.hardcoretogether.port.ChallengeState
+import it.unimi.dsi.fastutil.ints.IntList
+import net.minecraft.core.component.DataComponents
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket
@@ -17,7 +19,15 @@ import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.sounds.SoundEvents
 import net.minecraft.sounds.SoundSource
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.world.entity.projectile.FireworkRocketEntity
+import net.minecraft.world.item.DyeColor
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.item.Items
+import net.minecraft.world.item.component.FireworkExplosion
+import net.minecraft.world.item.component.Fireworks
 import net.minecraft.world.level.GameType
+import net.minecraft.world.phys.Vec3
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent
 
 /**
@@ -47,7 +57,7 @@ class DeathCountdown(
         val mobId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.type)?.toString() ?: return
         val category = HardcoreConfig.categoryOf(mobId)
         if (category != BossCategory.NONE) {
-            handleBossKill(mobId, category)
+            handleBossKill(level, entity, mobId, category)
         }
     }
 
@@ -116,8 +126,10 @@ class DeathCountdown(
         }
     }
 
-    private fun handleBossKill(mobId: String, category: BossCategory) {
+    private fun handleBossKill(level: ServerLevel, entity: LivingEntity, mobId: String, category: BossCategory) {
         val trigger = BossTrigger(mobId)
+        val bossName = entity.type.description
+        val pos = entity.position()
         val onResult: (ArchiveResult) -> Unit = { result ->
             when (result) {
                 is ArchiveResult.Success -> {}
@@ -130,10 +142,59 @@ class DeathCountdown(
             }
         }
         when (category) {
-            BossCategory.CHECKPOINT -> applicationService.recordCheckpoint(trigger, onResult)
-            BossCategory.CLEAR -> applicationService.recordClear(trigger, onResult)
+            BossCategory.CHECKPOINT -> {
+                announceCheckpoint(level, pos, bossName)
+                applicationService.recordCheckpoint(trigger, onResult)
+            }
+            BossCategory.CLEAR -> {
+                announceClear(level, pos, bossName)
+                applicationService.recordClear(trigger, onResult)
+            }
             BossCategory.NONE -> return
         }
+    }
+
+    private fun announceCheckpoint(level: ServerLevel, pos: Vec3, bossName: Component) {
+        val server = level.server
+        server.playerList.broadcastSystemMessage(
+            Component.literal("").append(bossName).append(Component.literal("を討伐！チェックポイントを保存しました")),
+            false,
+        )
+        for (p in server.playerList.players) {
+            sendTitle(p, Component.literal("チェックポイント達成"), bossName, 0, 60, 20)
+            p.playNotifySound(SoundEvents.PLAYER_LEVELUP, SoundSource.MASTER, 1f, 1f)
+        }
+        spawnFirework(level, pos, 0)
+    }
+
+    private fun announceClear(level: ServerLevel, pos: Vec3, bossName: Component) {
+        val server = level.server
+        server.playerList.broadcastSystemMessage(
+            Component.literal("").append(bossName).append(Component.literal("を討伐！挑戦クリア！")),
+            false,
+        )
+        for (p in server.playerList.players) {
+            sendTitle(p, Component.literal("挑戦クリア！"), Component.literal("/lobbyで退出"), 0, 120, 10)
+            p.playNotifySound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.MASTER, 1f, 1f)
+        }
+        // flightDurationを0〜CLEAR_FIREWORK_MAX_FLIGHT_DURATIONへ散らし、爆発タイミングを
+        // 約5秒間に分散させる（FireworkRocketEntityの寿命は概ね10*(1+flightDuration)tick）。
+        repeat(CLEAR_FIREWORK_COUNT) {
+            spawnFirework(level, pos, (0..CLEAR_FIREWORK_MAX_FLIGHT_DURATION).random())
+        }
+    }
+
+    private fun spawnFirework(level: ServerLevel, pos: Vec3, flightDuration: Int) {
+        val explosion = FireworkExplosion(
+            FIREWORK_SHAPES.random(),
+            IntList.of(FIREWORK_COLORS.random().fireworkColor, FIREWORK_COLORS.random().fireworkColor),
+            IntList.of(),
+            true,
+            true,
+        )
+        val stack = ItemStack(Items.FIREWORK_ROCKET)
+        stack.set(DataComponents.FIREWORKS, Fireworks(flightDuration, listOf(explosion)))
+        level.addFreshEntity(FireworkRocketEntity(level, pos.x, pos.y, pos.z, stack))
     }
 
     private fun sendTitle(player: ServerPlayer, title: Component, subtitle: Component, fadeIn: Int, stay: Int, fadeOut: Int) {
@@ -145,5 +206,11 @@ class DeathCountdown(
     companion object {
         private const val COUNTDOWN_SECONDS = 10
         private const val COUNTDOWN_TICKS = COUNTDOWN_SECONDS * 20
+
+        private const val CLEAR_FIREWORK_COUNT = 8
+        private const val CLEAR_FIREWORK_MAX_FLIGHT_DURATION = 9 // 10*(1+9)tick ≈ 5秒付近まで散らす
+
+        private val FIREWORK_SHAPES = FireworkExplosion.Shape.entries.toTypedArray()
+        private val FIREWORK_COLORS = DyeColor.entries.toTypedArray()
     }
 }
