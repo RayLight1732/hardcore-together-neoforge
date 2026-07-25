@@ -42,21 +42,23 @@ object CommandRegistrar {
             return 0
         }
         val elapsed = runtime.challengeService.elapsedSeconds()
-        when (val result = runtime.archiveService.archive(name, elapsed)) {
-            is ArchiveResult.Success -> {}
-            is ArchiveResult.Rejected -> {
-                source.sendFailure(Component.literal("アーカイブに失敗しました: ${result.reason}"))
-                return 0
-            }
-            is ArchiveResult.TimedOut -> {
-                source.sendFailure(Component.literal("アーカイブに失敗しました（Gateからの応答がタイムアウトしました）: $name"))
-                return 0
+        val triggerPlayer = (source.entity as? ServerPlayer)?.stringUUID ?: "console"
+
+        runtime.archiveService.archive(name, elapsed) { result ->
+            when (result) {
+                is ArchiveResult.Success -> {
+                    runtime.recordService.appendSave(runtime.challengeService.id, elapsed, name, ManualTrigger(triggerPlayer))
+                    source.sendSuccess({ Component.literal("保存完了: $name") }, true)
+                }
+                is ArchiveResult.Rejected ->
+                    source.sendFailure(Component.literal("アーカイブに失敗しました: ${result.reason}"))
+                is ArchiveResult.TimedOut ->
+                    source.sendFailure(Component.literal("アーカイブに失敗しました（Gateからの応答がタイムアウトしました）: $name"))
+                is ArchiveResult.NotConnected ->
+                    source.sendFailure(Component.literal("アーカイブに失敗しました（Gateに接続されていません）: $name"))
             }
         }
-
-        val triggerPlayer = (source.entity as? ServerPlayer)?.stringUUID ?: "console"
-        runtime.recordService.appendSave(runtime.challengeService.id, elapsed, name, ManualTrigger(triggerPlayer))
-        source.sendSuccess({ Component.literal("保存完了: $name") }, true)
+        source.sendSuccess({ Component.literal("アーカイブ処理を開始しました: $name") }, false)
         return 1
     }
 }
