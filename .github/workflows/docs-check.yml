@@ -2,8 +2,9 @@ name: Docs sync check
 
 on:
   push:
+    branches:
+      - main
   pull_request:
-    types: [ opened, reopened ]
 
 jobs:
   docs-check:
