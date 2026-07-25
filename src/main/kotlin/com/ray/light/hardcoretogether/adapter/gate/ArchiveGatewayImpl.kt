@@ -3,6 +3,7 @@ package com.ray.light.hardcoretogether.adapter.gate
 import com.ray.light.hardcoretogether.port.ArchiveGateway
 import com.ray.light.hardcoretogether.port.ArchiveResult
 import net.minecraft.server.MinecraftServer
+import net.neoforged.neoforge.common.IOUtilities
 import java.time.Instant
 
 /**
@@ -57,6 +58,12 @@ class ArchiveGatewayImpl(
         }
         inFlight = true
         dispatch("save-all flush")
+        // save-all flush is fully synchronous for vanilla's own chunk/level saving, but NeoForge
+        // routes SavedData writes (world/data/*.dat - random_sequences.dat, data attachments,
+        // etc; see SavedData.save()) through its own background IOUtilities worker instead of
+        // waiting for them inline. Without this, Manager's copy can rarely race a file that's
+        // still mid-write there, well after flush has already returned and logged completion.
+        IOUtilities.waitUntilIOWorkerComplete()
         connection.sendArchiveRequest(next.name, next.elapsedTime, Instant.now().toString()) { result ->
             server.execute {
                 inFlight = false
